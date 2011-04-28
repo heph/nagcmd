@@ -41,11 +41,11 @@ my $host_custom_variables = custom_variables_to_hash($service->{'host_custom_var
 
 # get the check_command string for the service 
 my @check_command = split('!', $service->{'check_command'});
-$query = <<HEREDOC;
+$query = <<COMMANDS;
 GET commands
 Columns: line
 Filter: name = @check_command[0]
-HEREDOC
+COMMANDS
 my $command_line = $nl->select_scalar_value($query);
 
 # fill in all the macros in the command_line and print the result
