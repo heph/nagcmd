@@ -1,0 +1,13 @@
+given a host and service, print the executed command line
+
+This helps track down problems with nagios plugins so you can execute
+the exact command that nagios is running and view all output.
+
+Requires the MK_Livestatus NDO plugin and Nagios::MKLivestatus
+
+You will need to modify the script to reference your resources file
+and the location of the MK_Livestatus socket
+
+You may need to modify parse_macros() to parse out the macros in use
+by your environment.
+
