@@ -1,0 +1,95 @@
+#!/usr/bin/perl
+# nagcmd - given a host and service, print the executed command line
+# This helps track down problems with nagios plugins so you can execute
+# the exact command that nagios is running and view all output.
+#
+# Requires the MK_Livestatus NDO plugin and Nagios::MKLivestatus
+#
+# You may need to modify parse_macros() to parse out the macros in use
+# by your environment.
+#
+
+use strict;
+use Nagios::MKLivestatus;
+use Getopt::Long;
+
+my $resources = '/srv/nagios/etc/resource.cfg';
+my $socket = '/srv/nagios/var/spool/live';
+
+my $host_name;
+my $service_description;
+GetOptions('host=s' => \$host_name, 'service=s' => \$service_description);
+
+print &usage and exit(1) unless(length($host_name) && length($service_description));
+
+my $nl = Nagios::MKLivestatus->new( socket => $socket );
+$nl->warnings(0);
+my $query;
+
+# load the service into a hashref
+my $service;
+$query = <<SERVICES;
+GET services
+Filter: host_name = $host_name
+Filter: description = $service_description
+SERVICES
+$service = $nl->selectrow_hashref($query);
+
+# break out custom variables into hashes
+my $custom_variables = custom_variables_to_hash($service->{'custom_variable_names'}, $service->{'custom_variable_values'});
+my $host_custom_variables = custom_variables_to_hash($service->{'host_custom_variable_names'}, $service->{'host_custom_variable_values'});
+
+# get the check_command string for the service 
+my @check_command = split('!', $service->{'check_command'});
+$query = <<HEREDOC;
+GET commands
+Columns: line
+Filter: name = @check_command[0]
+HEREDOC
+my $command_line = $nl->select_scalar_value($query);
+
+# fill in all the macros in the command_line and print the result
+print parse_macros($command_line) ."\n";
+
+sub parse_macros {
+	my $cmdline = shift;
+
+	$cmdline =~ s/\$ARG(\d+)\$/@check_command[$1]/g;
+	$cmdline =~ s/\$HOSTALIAS\$/$service->{'host_alias'}/g;
+	$cmdline =~ s/\$SERVICEDESC\$/$service->{'description'}/g;
+	$cmdline =~ s/\$HOSTADDRESS\$/$service->{'host_address'}/g;
+	$cmdline =~ s/\$HOSTNAME\$/$service->{'host_name'}/g;
+	$cmdline =~ s/\$SERVICESTATE\$/$service->{'state'}/g;
+	$cmdline =~ s/\$_SERVICE(\w+)\$/$custom_variables->{$1}/g;
+	$cmdline =~ s/\$_HOST(\w+)\$/$host_custom_variables->{$1}/g;
+
+	my $macros = ();
+	if($cmdline =~ /\$USER\d+\$/) {
+		# replace USER variables out of the resources.cfg file
+		open(FH, $resources);
+		while(<FH>) {
+			if(/\$(\w+)\$\s*=\s*(.*)$/) {
+				$macros->{$1} = $2;
+			}
+		}
+		close(FH);
+
+		$cmdline =~ s/\$(USER\d+)\$/$macros->{$1}/g;
+	}
+
+	return $cmdline;
+}
+
+sub custom_variables_to_hash {
+	my @names  = split(',', shift);
+	my @values = split(',', shift);
+	my %hash = ();
+	map { $hash{@names[$_]} = @values[$_] } 0 .. $#names;
+	return \%hash;
+}
+
+
+sub usage {
+	"$0 --host=<hostname> --service=<service_description>\n";
+}
+
